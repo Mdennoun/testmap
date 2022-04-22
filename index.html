@@ -1,0 +1,147 @@
+<html>
+<header>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.1/dist/css/bootstrap.min.css"
+        integrity="sha384-zCbKRCUGaJDkqS1kPbPd7TveP5iyJE0EjAuZQTgFLD2ylzuqKfdKlfG/eSrtxUkn" crossorigin="anonymous">
+    <script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.7.3/themes/base/jquery-ui.css">
+</header>
+
+<body>
+
+    <div class="container">
+        <form id="modal_form" action="process_form.php" method="post">
+            <div class="form-row">
+                <div class="form-group col">
+                    <label for="adresse" class="control-label">Adresse</label>
+                    <input type="text" class="form-control" id="adresse" name="adresse" autocomplete="off"
+                        data-toggle="tooltip" data-placement="top" title="Ce champ est intelligent... ;)" />
+                    <div class="address-feedback position-absolute list-group" style="z-index:1100;">
+                    </div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group col-sm-3">
+                    <label for="cp" class="control-label">Code Postal</label>
+                    <input type="text" class="form-control" id="cp" name="cp" />
+                </div>
+                <div class="form-group col-sm-6">
+                    <label for="ville">Ville</label>
+                    <input type="text" class="form-control" id="ville" name="ville" required />
+                </div>
+
+            </div>
+        </form>
+    </div>
+    <script>// FACULTATIF : Pour l'infobulle bootstrap du champ #adresse
+        $(function () {
+            $('[data-toggle="tooltip"]').tooltip()
+        })
+
+        /*
+         * Script de gestion de recherche avec l'API adresses.data.gouv.fr
+         * 
+         */
+
+        var currentFocus = -1;
+        var fetchTrigger = 0;
+
+        // Fonction pour mettre en forme visuellement un résultat sélectionné
+        function setActive() {
+            var nbVal = $("div.address-feedback a").length;
+            if (!nbVal)
+                return false; // Si on n'a aucun résultat listé, on s'arrête là.
+            // On commence par nettoyer une éventuelle sélection précédente
+            $('div.address-feedback a').removeClass("active");
+
+            // Bidouille mathématique pour contraindre le focus dans la plage du nombre de résultats
+            currentFocus = ((currentFocus + nbVal - 1) % nbVal) + 1;
+
+            $('div.address-feedback a:nth-child(' + currentFocus + ')').addClass("active");
+        }
+
+        // Au clic sur une adresse suggérée, on ventile l'adresse dans les champs appropriés. On espionne mousedown plutôt que click pour l'attraper avant la perte de focus du champ adresse.
+        $('div.address-feedback').on("mousedown", "a", function (event) {
+            // Stop la propagation par défaut
+            event.preventDefault();
+            event.stopPropagation();
+
+            $("#adresse").val($(this).attr("data-name"));
+            $("#cp").val($(this).attr("data-postcode"));
+            $("#ville").val($(this).attr("data-city"));
+
+            $('.address-feedback').empty();
+        });
+
+        // On espionne le clavier dans le champ adresse pour déclencher les actions qui vont bien
+        $("#adresse").keyup(function (event) {
+            // Stop la propagation par défaut
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (event.keyCode === 38) { // Flèche HAUT
+                currentFocus--;
+                setActive();
+                return false;
+            } else if (event.keyCode === 40) { // Flèche BAS
+                currentFocus++;
+                setActive();
+                return false;
+            } else if (event.keyCode === 13) { // Touche ENTREE
+                if (currentFocus > 0) {
+                    // On simule un clic sur l'élément actif
+                    $("div.address-feedback a:nth-child(" + currentFocus + ")").mousedown();
+                }
+                return false;
+            }
+
+            // Si on arrive ici c'est que l'user a avancé dans la saisie : on réinitialise le curseur de sélection.
+            $('div.address-feedback a').removeClass("active");
+            currentFocus = 0;
+
+            // On annule une éventuelle précédente requête en attente
+            clearTimeout(fetchTrigger);
+
+            // Si le champ adresse est vide, on nettoie la liste des suggestions et on ne lance pas de requête.
+            let rue = $("#adresse").val();
+            if (rue.length === 0) {
+                $('.address-feedback').empty();
+                return false;
+            }
+
+            // On lance une minuterie pour une requête vers l'API.
+            fetchTrigger = setTimeout(function () {
+                // On lance la requête sur l'API
+                $.get('https://api-adresse.data.gouv.fr/search/', {
+                    q: rue,
+                    limit: 15,
+                    autocomplete: 1
+                }, function (data, status, xhr) {
+                    let liste = "";
+                    $.each(data.features, function (i, obj) {
+                        // données phase 1 (obj.properties.label) & phase 2 : name, postcode, city
+                        // J'ajoute chaque élément dans une liste
+                        let cooladdress = obj.properties.name + " " + obj.properties.postcode + " <strong>" + obj.properties.city + "</strong>";
+                        liste += '<a class="list-group-item list-group-item-action py-1" href="#" name="' + obj.properties.label + '" data-name="' + obj.properties.name + '" data-postcode="' + obj.properties.postcode + '" data-city="' + obj.properties.city + '">' + cooladdress + '</a>';
+                    });
+                    $('.address-feedback').html(liste);
+                }, 'json');
+            }, 500);
+        });
+
+        // On cache la liste si le champ adresse perd le focus
+        $("#adresse").focusout(function () {
+            $('.address-feedback').empty();
+        });
+
+        // On annule le comportement par défaut des touches entrée et flèches si une liste de suggestion d'adresses est affichée
+        $("#adresse").keydown(function (e) {
+            if ($("div.address-feedback a").length > 0 && (e.keyCode === 38 || e.keyCode === 40 || e.keyCode === 13)) {
+                e.preventDefault();
+            }
+        });
+    </script>
+
+</body>
+
+</html>
